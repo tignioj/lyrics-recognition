@@ -36,15 +36,18 @@ const modelLabels = new Map(
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
   const units = ['B', 'KB', 'MB', 'GB'];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / (1024 ** index);
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1000)), units.length - 1);
+  const value = bytes / (1000 ** index);
   return `${value.toFixed(index >= 3 ? 2 : index === 2 ? 1 : 0)} ${units[index]}`;
 }
 
 function statusSuffix(status) {
   if (!status) return '检查中';
   if (status.status === 'downloaded') return '已下载';
-  if (status.status === 'downloading') return `下载 ${Math.floor(status.progress || 0)}%`;
+  if (status.status === 'downloading') {
+    const action = status.phase === 'reconstructing' ? '写入' : '下载';
+    return `${action} ${Math.floor(status.progress || 0)}%`;
+  }
   if (status.status === 'partial') return '未下载完整';
   if (status.status === 'error') return '下载出错';
   return '未下载';
@@ -73,9 +76,10 @@ function renderSelectedModelStatus() {
 
   const progress = Math.max(0, Math.min(100, Number(status.progress) || 0));
   modelBadge.textContent = statusSuffix(status);
+  const progressTotalBytes = status.progress_total_bytes || status.total_bytes;
   modelSize.textContent = status.status === 'downloaded'
     ? formatBytes(status.total_bytes)
-    : `${formatBytes(status.downloaded_bytes)} / ${formatBytes(status.total_bytes)}`;
+    : `${formatBytes(status.downloaded_bytes)} / ${formatBytes(progressTotalBytes)}`;
   modelPath.textContent = status.path;
 
   if (status.status === 'downloaded') {
@@ -85,7 +89,9 @@ function renderSelectedModelStatus() {
     modelPathLabel.textContent = '已下载到';
   } else if (status.status === 'downloading') {
     modelBadge.classList.add('is-downloading');
-    modelStatusText.textContent = `正在下载模型 · ${progress.toFixed(1)}%`;
+    modelStatusText.textContent = status.phase === 'reconstructing'
+      ? `正在写入模型文件 · ${progress.toFixed(1)}%`
+      : `正在下载网络数据 · ${progress.toFixed(1)}%`;
     modelProgress.hidden = false;
     modelProgressBar.style.width = `${progress}%`;
     modelPathLabel.textContent = '正在下载到';
@@ -112,7 +118,9 @@ function updateProcessingStage() {
   if (!status) {
     processingStage.textContent = '正在检查识别模型…';
   } else if (status.status === 'downloading') {
-    processingStage.textContent = `正在下载 ${modelLabels.get(modelSelect.value)} · ${status.progress.toFixed(1)}% · ${formatBytes(status.downloaded_bytes)} / ${formatBytes(status.total_bytes)}`;
+    const action = status.phase === 'reconstructing' ? '正在写入模型文件' : '正在下载模型数据';
+    const progressTotalBytes = status.progress_total_bytes || status.total_bytes;
+    processingStage.textContent = `${action} · ${status.progress.toFixed(1)}% · ${formatBytes(status.downloaded_bytes)} / ${formatBytes(progressTotalBytes)}`;
   } else if (status.status === 'downloaded') {
     processingStage.textContent = '模型已就绪，正在识别并对齐歌词…';
   } else if (status.status === 'error') {

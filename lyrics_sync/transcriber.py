@@ -165,8 +165,19 @@ def model_cache_status(model_name: str, cache_root: str | Path | None = None) ->
         live = dict(_DOWNLOAD_PROGRESS.get(model_name, {}))
 
     downloaded_bytes = details["downloaded_bytes"]
+    progress_total_bytes = total_bytes
+    phase = live.get("phase")
     if live.get("status") == "downloading":
-        downloaded_bytes = max(downloaded_bytes, int(live.get("downloaded_bytes", 0)))
+        live_bytes = int(live.get("downloaded_bytes", 0))
+        live_total = int(live.get("total_bytes", 0))
+        if phase == "downloading" and live_total:
+            # Xet downloads the network chunks first and reconstructs the final
+            # model file afterwards. This is a separate phase, not extra bytes
+            # to add to the reconstruction progress.
+            downloaded_bytes = live_bytes
+            progress_total_bytes = live_total
+        else:
+            downloaded_bytes = max(downloaded_bytes, live_bytes)
         status = "downloading"
     elif details["complete"]:
         downloaded_bytes = total_bytes
@@ -178,8 +189,12 @@ def model_cache_status(model_name: str, cache_root: str | Path | None = None) ->
     else:
         status = "not_downloaded"
 
-    downloaded_bytes = min(downloaded_bytes, total_bytes)
-    progress = round(downloaded_bytes / total_bytes * 100, 1) if total_bytes else None
+    downloaded_bytes = min(downloaded_bytes, progress_total_bytes)
+    progress = (
+        round(downloaded_bytes / progress_total_bytes * 100, 1)
+        if progress_total_bytes
+        else None
+    )
     result = {
         "name": model_name,
         "repository": MODEL_REPOSITORIES[model_name],
@@ -187,9 +202,12 @@ def model_cache_status(model_name: str, cache_root: str | Path | None = None) ->
         "downloaded": status == "downloaded",
         "downloaded_bytes": downloaded_bytes,
         "total_bytes": total_bytes,
+        "progress_total_bytes": progress_total_bytes,
         "progress": progress,
         "path": details["path"],
     }
+    if phase:
+        result["phase"] = phase
     if live.get("error"):
         result["error"] = live["error"]
     return result
@@ -212,8 +230,30 @@ def _tracked_tqdm(model_name: str):
             with _DOWNLOAD_PROGRESS_LOCK:
                 state = _DOWNLOAD_PROGRESS.setdefault(model_name, {})
                 jobs = state.setdefault("jobs", {})
-                jobs[self._model_progress_id] = int(self.n)
-                state["downloaded_bytes"] = sum(jobs.values())
+                jobs[self._model_progress_id] = {
+                    "description": str(self.desc or ""),
+                    "downloaded_bytes": int(self.n),
+                    "total_bytes": int(self.total),
+                }
+                reconstructing = [
+                    job
+                    for job in jobs.values()
+                    if "reconstruct" in job["description"].casefold()
+                ]
+                downloading = [
+                    job
+                    for job in jobs.values()
+                    if "download" in job["description"].casefold()
+                ]
+                candidates = reconstructing or downloading or list(jobs.values())
+                active_job = max(candidates, key=lambda job: job["total_bytes"])
+                state.update(
+                    {
+                        "phase": "reconstructing" if reconstructing else "downloading",
+                        "downloaded_bytes": active_job["downloaded_bytes"],
+                        "total_bytes": active_job["total_bytes"],
+                    }
+                )
 
         def update(self, n=1):
             result = super().update(n)

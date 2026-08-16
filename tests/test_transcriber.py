@@ -1,12 +1,21 @@
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from huggingface_hub.errors import LocalEntryNotFoundError
 
-from lyrics_sync.transcriber import _cached_model_path, model_cache_status, transcribe
+from lyrics_sync.transcriber import (
+    _DOWNLOAD_PROGRESS,
+    _DOWNLOAD_PROGRESS_LOCK,
+    MODEL_DOWNLOAD_BYTES,
+    _cached_model_path,
+    _tracked_tqdm,
+    model_cache_status,
+    transcribe,
+)
 
 
 class TranscriberTests(unittest.TestCase):
@@ -39,6 +48,36 @@ class TranscriberTests(unittest.TestCase):
             self.assertEqual(status["status"], "partial")
             self.assertEqual(status["downloaded_bytes"], 7)
             self.assertEqual(status["path"], str(repo_dir))
+
+    def test_reconstruction_progress_is_not_added_to_network_download(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            total_bytes = MODEL_DOWNLOAD_BYTES["medium"]
+            with _DOWNLOAD_PROGRESS_LOCK:
+                _DOWNLOAD_PROGRESS["medium"] = {"status": "downloading", "jobs": {}}
+            progress_class = _tracked_tqdm("medium")
+            output = StringIO()
+            downloading = progress_class(
+                total=total_bytes,
+                desc="Downloading bytes",
+                file=output,
+            )
+            downloading.update(900_000_000)
+            reconstructing = progress_class(
+                total=total_bytes,
+                desc="Reconstructing (incomplete total...)",
+                file=output,
+            )
+            reconstructing.update(400_000_000)
+
+            status = model_cache_status("medium", temp_dir)
+
+            self.assertEqual(status["phase"], "reconstructing")
+            self.assertEqual(status["downloaded_bytes"], 400_000_000)
+            self.assertEqual(status["progress_total_bytes"], total_bytes)
+            downloading.close()
+            reconstructing.close()
+            with _DOWNLOAD_PROGRESS_LOCK:
+                _DOWNLOAD_PROGRESS.pop("medium", None)
 
     @patch("faster_whisper.utils.download_model")
     def test_cached_model_path_uses_complete_local_snapshot(self, mocked_download):
