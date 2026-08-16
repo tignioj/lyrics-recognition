@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>歌词时间轴 · Lyrics Sync</title>
+  <link rel="stylesheet" href="/static/styles.css?v=2">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="eyebrow">LYRICS SYNC</div>
+      <h1>让每句歌词，落在声音里。</h1>
+      <p>上传歌曲，粘贴标准歌词。自动生成可导入 After Effects 的时间轴，以及 LRC、SRT、CSV 和 JSON。</p>
+    </header>
+
+    <section class="workspace" aria-label="歌词时间轴生成器">
+      <form id="align-form" class="input-panel">
+        <div class="section-heading">
+          <span class="step">01</span>
+          <div>
+            <h2>声音与文字</h2>
+            <p>歌词请保持“一行一句”，重复段落也要完整保留。</p>
+          </div>
+        </div>
+
+        <label id="drop-zone" class="drop-zone" for="audio">
+          <input id="audio" name="audio" type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.aac,.ogg" required>
+          <span class="drop-icon" aria-hidden="true">↗</span>
+          <strong id="file-title">选择音频文件</strong>
+          <small id="file-meta">MP3 · WAV · M4A · FLAC，最大 200 MB</small>
+        </label>
+
+        <label class="field-label" for="lyrics">标准歌词</label>
+        <textarea id="lyrics" name="lyrics" rows="14" placeholder="教室里那台风琴 叮咚叮咚叮咛&#10;像你告白的声音 动作一直很轻&#10;……" required></textarea>
+        <div class="textarea-meta"><span id="line-count">0 行</span><span>空行会自动忽略</span></div>
+
+        <div class="settings-row">
+          <label>
+            <span class="field-label">识别模型</span>
+            <select id="model" name="model">
+              <option value="small" selected>Small · 推荐起步</option>
+              <option value="medium">Medium · 更准确</option>
+              <option value="large-v3">Large v3 · 最准确</option>
+              <option value="turbo">Turbo · GPU 快速</option>
+              <option value="base">Base · 低配置</option>
+              <option value="tiny">Tiny · 仅测试</option>
+            </select>
+          </label>
+          <label>
+            <span class="field-label">歌词语言</span>
+            <select id="language" name="language">
+              <option value="zh" selected>中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="yue">粤语</option>
+            </select>
+          </label>
+        </div>
+
+        <button id="submit-button" class="primary-button" type="submit">
+          <span>生成歌词时间轴</span><span aria-hidden="true">→</span>
+        </button>
+        <p class="model-note">首次使用某个模型会自动下载模型文件，等待时间取决于网络与模型大小。</p>
+      </form>
+
+      <section class="result-panel">
+        <div class="section-heading">
+          <span class="step">02</span>
+          <div>
+            <h2>时间轴</h2>
+            <p id="result-summary">生成后可试听定位并下载目标格式。</p>
+          </div>
+        </div>
+
+        <div id="empty-state" class="empty-state">
+          <div class="sound-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <strong>等待一段声音</strong>
+          <span>时间戳结果会出现在这里</span>
+        </div>
+
+        <div id="processing-state" class="processing-state" hidden>
+          <div class="spinner"></div>
+          <strong>正在聆听并对齐歌词</strong>
+          <span id="processing-time">已用时 0 秒</span>
+          <small>歌曲识别通常需要几十秒到几分钟，请保持页面打开。</small>
+        </div>
+
+        <div id="error-state" class="error-state" hidden>
+          <strong>没有完成对齐</strong>
+          <p id="error-message"></p>
+        </div>
+
+        <div id="results" hidden>
+          <audio id="audio-player" controls></audio>
+          <div class="quality-card">
+            <div><span>整体匹配</span><strong id="quality-score">—</strong></div>
+            <div><span>歌曲时长</span><strong id="duration">—</strong></div>
+            <div><span>处理耗时</span><strong id="processing-duration">—</strong></div>
+          </div>
+
+          <div class="download-grid">
+            <button type="button" data-format="jsx"><strong>AE · JSX</strong><span>直接生成文字图层</span></button>
+            <button type="button" data-format="lrc"><strong>LRC</strong><span>通用歌词时间戳</span></button>
+            <button type="button" data-format="srt"><strong>SRT</strong><span>字幕与剪辑软件</span></button>
+            <button type="button" data-format="csv"><strong>CSV</strong><span>表格与批处理</span></button>
+            <button type="button" data-format="json"><strong>JSON</strong><span>接口与程序调用</span></button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>#</th><th>开始</th><th>结束</th><th>歌词</th><th>匹配</th></tr></thead>
+              <tbody id="timeline-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script src="/static/app.js?v=2" defer></script>
+</body>
+</html>

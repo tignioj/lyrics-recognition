@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import tempfile
+import time
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from lyrics_sync import __version__
+from lyrics_sync.alignment import align_lyrics, clean_lyrics
+from lyrics_sync.exporters import build_exports
+from lyrics_sync.transcriber import TranscriberUnavailable, audio_duration, transcribe
+
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_MB", "200")) * 1024 * 1024
+ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3", "turbo"}
+
+app = FastAPI(
+    title="Lyrics Sync API",
+    version=__version__,
+    description="上传音频与标准歌词，返回逐行时间戳及 AE/LRC/SRT/CSV 导出。",
+)
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {"status": "ok", "version": __version__}
+
+
+@app.post("/api/align")
+async def align(
+    audio: UploadFile = File(..., description="MP3/WAV/M4A/FLAC 等音频文件"),
+    lyrics: str = Form(..., description="每行一句的标准歌词"),
+    model: str = Form("small", description="Whisper 模型"),
+    language: str = Form("zh", description="ISO 语言代码"),
+) -> dict:
+    started = time.perf_counter()
+    lines = clean_lyrics(lyrics)
+    if not lines:
+        raise HTTPException(status_code=422, detail="请至少输入一行歌词")
+    if model not in ALLOWED_MODELS:
+        raise HTTPException(status_code=422, detail=f"不支持的模型：{model}")
+
+    suffix = Path(audio.filename or "audio.mp3").suffix or ".audio"
+    total = 0
+    try:
+        with tempfile.TemporaryDirectory(prefix="lyrics-sync-") as temp_dir:
+            audio_path = Path(temp_dir) / f"input{suffix}"
+            with audio_path.open("wb") as output:
+                while chunk := await audio.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > MAX_AUDIO_BYTES:
+                        raise HTTPException(status_code=413, detail="音频文件超过大小限制")
+                    output.write(chunk)
+
+            duration = audio_duration(audio_path)
+            words, transcription = transcribe(audio_path, lyrics, model, language)
+            if duration <= 0 and words:
+                duration = max(word.end for word in words)
+            timed_lines, diagnostics = align_lyrics(lines, words, duration)
+    except HTTPException:
+        raise
+    except TranscriberUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"处理音频失败：{exc}") from exc
+    finally:
+        await audio.close()
+
+    metadata = {
+        "filename": audio.filename or "audio",
+        "duration": round(duration, 3),
+        "model": model,
+        "language": language,
+        "processing_seconds": round(time.perf_counter() - started, 3),
+        "diagnostics": diagnostics,
+        "transcription": transcription,
+    }
+    return {
+        "metadata": metadata,
+        "lines": [line.to_dict() for line in timed_lines],
+        "exports": build_exports(timed_lines, metadata),
+    }
+
+
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
