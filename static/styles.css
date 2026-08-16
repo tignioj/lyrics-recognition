@@ -94,7 +94,7 @@ audio { width: 100%; margin-bottom: 18px; }
 .lyrics-now time { color: #ff8b68; font-variant-numeric: tabular-nums; }
 .lyrics-now strong { position: relative; z-index: 1; display: block; padding-right: 46px; font-family: Georgia, "Noto Serif SC", serif; font-size: 20px; font-weight: 500; line-height: 1.45; }
 .lyrics-now > span { position: relative; z-index: 1; display: block; margin-top: 9px; padding-right: 46px; color: #aaa398; font-size: 11px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.quality-card { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); margin-bottom: 16px; }
+.quality-card { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); margin-bottom: 16px; }
 .quality-card div { padding: 15px; border-right: 1px solid var(--line); }
 .quality-card div:last-child { border-right: 0; }
 .quality-card span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px; }
@@ -117,6 +117,7 @@ tbody tr.is-active td:nth-child(4) { color: var(--accent-dark); font-weight: 800
 .time-cell { font-variant-numeric: tabular-nums; color: var(--green); }
 .confidence { display: inline-block; min-width: 44px; padding: 3px 6px; background: #e7f3ed; color: var(--green); text-align: center; }
 .confidence.low { background: #fff0e3; color: #ac4b1d; }
+.confidence-detail { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; text-align: center; }
 
 @media (max-width: 980px) {
   .workspace { grid-template-columns: 1fr; }

@@ -69,7 +69,7 @@ curl.exe -X POST http://127.0.0.1:8000/api/align `
 }
 ```
 
-`overall_confidence` 是标准歌词字符与识别字符的整体精确匹配率；每一行另有 `confidence`。歌唱识别比普通讲话困难，低匹配行应在网页中点击试听并人工复核。
+`overall_confidence` 和每行 `confidence` 是无声调拼音的声学匹配覆盖率，用于判断时间锚点；它不是文字识别准确率。`text_confidence` 是汉字精确匹配率。歌唱识别比普通讲话困难，低声学匹配行应在网页中点击试听并人工复核。
 
 ## 导入 After Effects
 

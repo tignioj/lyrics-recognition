@@ -37,9 +37,27 @@ def export_srt(lines: list[TimedLine]) -> str:
 def export_csv(lines: list[TimedLine]) -> str:
     output = StringIO(newline="")
     writer = csv.writer(output)
-    writer.writerow(["index", "start_seconds", "end_seconds", "text", "confidence"])
+    writer.writerow(
+        [
+            "index",
+            "start_seconds",
+            "end_seconds",
+            "text",
+            "phonetic_confidence",
+            "text_confidence",
+        ]
+    )
     for line in lines:
-        writer.writerow([line.index, f"{line.start:.3f}", f"{line.end:.3f}", line.text, f"{line.confidence:.3f}"])
+        writer.writerow(
+            [
+                line.index,
+                f"{line.start:.3f}",
+                f"{line.end:.3f}",
+                line.text,
+                f"{line.confidence:.3f}",
+                f"{line.text_confidence:.3f}",
+            ]
+        )
     return "\ufeff" + output.getvalue()
 
 
@@ -91,4 +109,3 @@ def build_exports(lines: list[TimedLine], metadata: dict) -> dict[str, str]:
         "json": export_json(lines, metadata),
         "jsx": export_ae_jsx(lines),
     }
-

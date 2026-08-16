@@ -359,9 +359,10 @@ def transcribe(
     lyrics: str,
     model_name: str = "small",
     language: str = "zh",
+    use_lyrics_prompt: bool = True,
 ) -> tuple[list[WordSpan], dict]:
     model = load_model(model_name)
-    prompt = lyrics[:6000]
+    prompt = lyrics[:6000] if use_lyrics_prompt else None
 
     def run(active_model, active_prompt: str | None):
         segments, info = active_model.transcribe(
@@ -372,7 +373,10 @@ def transcribe(
             temperature=0.0,
             word_timestamps=True,
             vad_filter=False,
-            condition_on_previous_text=True,
+            # Songs contain long pauses and repeated choruses. Carrying decoded
+            # text across windows can make one hallucination shift every later
+            # lyric anchor, while the supplied prompt already provides context.
+            condition_on_previous_text=False,
             initial_prompt=active_prompt,
         )
 
@@ -423,5 +427,6 @@ def transcribe(
         "runtime": runtime,
         "attempts": attempts,
         "prompt_retry": attempts > 1,
+        "prompt_mode": "lyrics" if use_lyrics_prompt else "none",
     }
     return words, details

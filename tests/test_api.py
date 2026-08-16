@@ -98,6 +98,8 @@ class ApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["metadata"]["filename"], "demo.mp3")
         self.assertEqual(len(payload["lines"]), 2)
+        self.assertEqual(payload["lines"][0]["confidence"], 1.0)
+        self.assertEqual(payload["lines"][0]["text_confidence"], 1.0)
         self.assertEqual(set(payload["exports"]), {"lrc", "srt", "csv", "json", "jsx"})
         self.assertIn("第一句", payload["exports"]["lrc"])
 
@@ -122,6 +124,43 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(transcription["requested_model"], "turbo")
         self.assertEqual(transcription["effective_model"], "small")
         self.assertEqual(mocked_transcribe.call_args_list[1].args[2], "small")
+
+    @patch("app.audio_duration", return_value=8.0)
+    @patch("app.transcribe")
+    def test_zero_anchor_lines_retry_without_lyrics_prompt(
+        self, mocked_transcribe, _mocked_duration
+    ):
+        mocked_transcribe.side_effect = [
+            (
+                [
+                    WordSpan("第一句", 1.0, 2.0, 0.9),
+                    WordSpan("完全无关", 3.0, 4.0, 0.9),
+                ],
+                {"runtime": "gpu", "prompt_mode": "lyrics"},
+            ),
+            (
+                [
+                    WordSpan("第一句", 1.0, 2.0, 0.9),
+                    WordSpan("第二句", 3.0, 4.0, 0.9),
+                ],
+                {"runtime": "gpu", "prompt_mode": "none"},
+            ),
+        ]
+
+        _, lines, diagnostics, transcription = _process_audio(
+            None,
+            "第一句\n第二句",
+            ["第一句", "第二句"],
+            "large-v3",
+            "zh",
+        )
+
+        self.assertEqual(diagnostics["overall_confidence"], 1.0)
+        self.assertTrue(transcription["decoding_retry"])
+        self.assertTrue(transcription["decoding_retry_selected"])
+        self.assertEqual(transcription["decoding_variant"], "prompt_free")
+        self.assertEqual(lines[1].confidence, 1.0)
+        self.assertFalse(mocked_transcribe.call_args_list[1].kwargs["use_lyrics_prompt"])
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_MB", "200")) * 1024 * 1024
 ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3", "turbo"}
 MODEL_ORDER = ("small", "medium", "large-v3", "turbo", "base", "tiny")
 MINIMUM_USEFUL_MATCH = 0.05
+DECODING_RETRY_MATCH = 0.75
 
 app = FastAPI(
     title="Lyrics Sync API",
@@ -50,6 +51,44 @@ def _process_audio(
     if duration <= 0 and words:
         duration = max(word.end for word in words)
     timed_lines, diagnostics = align_lyrics(lines, words, duration)
+
+    zero_lines = sum(line.confidence == 0 for line in timed_lines)
+    should_retry_decoding = diagnostics["overall_confidence"] >= MINIMUM_USEFUL_MATCH and (
+        diagnostics["overall_confidence"] < DECODING_RETRY_MATCH or zero_lines > 0
+    )
+    if should_retry_decoding:
+        retry_words, retry_transcription = transcribe(
+            audio_path,
+            lyrics,
+            model,
+            language,
+            use_lyrics_prompt=False,
+        )
+        retry_lines, retry_diagnostics = align_lyrics(lines, retry_words, duration)
+
+        def candidate_score(candidate_lines, candidate_diagnostics) -> float:
+            zero_count = sum(line.confidence == 0 for line in candidate_lines)
+            low_count = sum(line.confidence < 0.45 for line in candidate_lines)
+            return (
+                candidate_diagnostics["overall_confidence"]
+                - zero_count * 0.03
+                - low_count * 0.01
+            )
+
+        retry_selected = candidate_score(
+            retry_lines, retry_diagnostics
+        ) > candidate_score(timed_lines, diagnostics)
+        if retry_selected:
+            timed_lines = retry_lines
+            diagnostics = retry_diagnostics
+            transcription = retry_transcription
+        transcription.update(
+            {
+                "decoding_retry": True,
+                "decoding_retry_selected": retry_selected,
+                "decoding_variant": "prompt_free" if retry_selected else "lyrics_prompt",
+            }
+        )
 
     if model != "small" and diagnostics["overall_confidence"] < MINIMUM_USEFUL_MATCH:
         fallback_words, fallback_transcription = transcribe(

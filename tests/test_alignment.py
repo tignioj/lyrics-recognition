@@ -34,6 +34,42 @@ class AlignmentTests(unittest.TestCase):
         self.assertLess(lines[0].start, lines[1].start)
         self.assertGreater(diagnostics["overall_confidence"], 0.8)
 
+    def test_phonetic_alignment_uses_homophones_as_time_anchors(self):
+        lyrics = [
+            "可是流光 赶来答疑",
+            "用身高举例 拿告别作比",
+            "先生秃着头顶 说这叫川流不息",
+            "假装没听见我问 流去到哪里",
+        ]
+        words = [
+            WordSpan("可是流光敢来大意", 1.0, 4.0, 0.8),
+            WordSpan("用深刻距离拉高别作弊", 4.0, 8.0, 0.8),
+            WordSpan("先生吐着头顶说着脚传流不息", 8.0, 13.0, 0.8),
+            WordSpan("假装没听见我问流去到哪里", 13.0, 17.0, 0.8),
+        ]
+
+        lines, diagnostics = align_lyrics(lyrics, words, 20.0)
+
+        self.assertEqual([line.confidence for line in lines], [1.0, 0.8, 1.0, 1.0])
+        self.assertLess(lines[0].text_confidence, lines[0].confidence)
+        self.assertLess(lines[2].text_confidence, lines[2].confidence)
+        self.assertGreater(diagnostics["phonetic_confidence"], diagnostics["text_confidence"])
+        self.assertEqual(diagnostics["overall_confidence"], diagnostics["phonetic_confidence"])
+
+    def test_low_probability_noise_is_not_used_as_an_anchor(self):
+        lines, diagnostics = align_lyrics(
+            ["正确歌词"],
+            [
+                WordSpan("幻觉噪声", 0.0, 1.0, 0.05),
+                WordSpan("正确歌词", 2.0, 3.0, 0.9),
+            ],
+            4.0,
+        )
+
+        self.assertEqual(lines[0].start, 2.0)
+        self.assertEqual(lines[0].confidence, 1.0)
+        self.assertEqual(diagnostics["recognized_text"], "正确歌词")
+
     def test_exports(self):
         lines, _ = align_lyrics(
             ["第一句", "第二句"],

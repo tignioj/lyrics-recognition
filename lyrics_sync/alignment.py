@@ -5,6 +5,8 @@ from difflib import SequenceMatcher
 import statistics
 import unicodedata
 
+from pypinyin import Style, lazy_pinyin
+
 
 @dataclass(slots=True)
 class WordSpan:
@@ -17,6 +19,7 @@ class WordSpan:
 @dataclass(slots=True)
 class TimedCharacter:
     char: str
+    phonetic: str
     start: float
     end: float
     probability: float
@@ -31,6 +34,8 @@ class TimedLine:
     confidence: float
     matched_characters: int
     total_characters: int
+    matched_phonetics: int = 0
+    text_confidence: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -61,6 +66,21 @@ def normalized_characters(text: str) -> list[str]:
     return result
 
 
+def phonetic_token(char: str) -> str:
+    """Return a tone-free token so Chinese homophones share one anchor."""
+    phonetic = lazy_pinyin(
+        char,
+        style=Style.NORMAL,
+        errors=lambda value: list(value),
+    )
+    return (phonetic[0] if phonetic else char).casefold().replace("ü", "v")
+
+
+def phonetic_tokens(text: str) -> tuple[list[str], list[str]]:
+    characters = normalized_characters(text)
+    return characters, [phonetic_token(char) for char in characters]
+
+
 def expand_words(words: list[WordSpan]) -> list[TimedCharacter]:
     """Expand Whisper word/phrase spans into approximate per-character spans."""
     characters: list[TimedCharacter] = []
@@ -74,6 +94,7 @@ def expand_words(words: list[WordSpan]) -> list[TimedCharacter]:
             characters.append(
                 TimedCharacter(
                     char=char,
+                    phonetic=phonetic_token(char),
                     start=max(0.0, word.start + index * step),
                     end=max(0.0, word.start + (index + 1) * step),
                     probability=max(0.0, min(1.0, word.probability)),
@@ -83,7 +104,7 @@ def expand_words(words: list[WordSpan]) -> list[TimedCharacter]:
 
 
 def _align_indices(expected: list[str], observed: list[str]) -> list[tuple[int, int, bool]]:
-    """Globally align character sequences and return diagonal mappings.
+    """Globally align token sequences and return diagonal mappings.
 
     A compact traceback table keeps memory bounded for normal song lyrics. Very
     large inputs fall back to SequenceMatcher to avoid quadratic runtime.
@@ -108,17 +129,20 @@ def _align_indices(expected: list[str], observed: list[str]) -> list[tuple[int, 
     for j in range(1, m + 1):
         directions[j] = 3
 
-    previous = list(range(m + 1))
-    for i, expected_char in enumerate(expected, start=1):
-        current = [i] + [0] * m
+    gap, match, mismatch = -2, 4, -3
+    previous = [j * gap for j in range(m + 1)]
+    for i, expected_token in enumerate(expected, start=1):
+        current = [i * gap] + [0] * m
         row_offset = i * width
-        for j, observed_char in enumerate(observed, start=1):
-            substitution = previous[j - 1] + (0 if expected_char == observed_char else 2)
-            deletion = previous[j] + 1
-            insertion = current[j - 1] + 1
-            best = min(substitution, deletion, insertion)
+        for j, observed_token in enumerate(observed, start=1):
+            diagonal = previous[j - 1] + (
+                match if expected_token == observed_token else mismatch
+            )
+            deletion = previous[j] + gap
+            insertion = current[j - 1] + gap
+            best = max(diagonal, deletion, insertion)
             current[j] = best
-            if substitution == best:
+            if diagonal == best:
                 directions[row_offset + j] = 1
             elif deletion == best:
                 directions[row_offset + j] = 2
@@ -244,22 +268,34 @@ def align_lyrics(
     audio_duration: float,
 ) -> tuple[list[TimedLine], dict]:
     """Align canonical lyric lines to Whisper timestamped words."""
-    expected: list[str] = []
+    expected_characters: list[str] = []
+    expected_phonetics: list[str] = []
     line_ranges: list[tuple[int, int]] = []
     for line in lyric_lines:
-        start = len(expected)
-        expected.extend(normalized_characters(line))
-        line_ranges.append((start, len(expected)))
+        characters, phonetics = phonetic_tokens(line)
+        start = len(expected_characters)
+        expected_characters.extend(characters)
+        expected_phonetics.extend(phonetics)
+        line_ranges.append((start, len(expected_characters)))
 
-    observed = expand_words(words)
-    if not expected:
+    reliable_words = [word for word in words if word.probability >= 0.12]
+    observed = expand_words(reliable_words or words)
+    if not expected_characters:
         raise ValueError("歌词中没有可对齐的文字")
     if not observed:
         raise ValueError("语音模型没有识别到可用文字，请尝试更大的模型或更清晰的人声")
 
-    mappings = _align_indices(expected, [char.char for char in observed])
-    character_times = _fill_character_times(len(expected), mappings, observed, audio_duration)
-    exact_expected = {expected_index for expected_index, _, exact in mappings if exact}
+    mappings = _align_indices(expected_phonetics, [char.phonetic for char in observed])
+    phonetic_mappings = [mapping for mapping in mappings if mapping[2]]
+    character_times = _fill_character_times(
+        len(expected_characters), phonetic_mappings, observed, audio_duration
+    )
+    phonetic_expected = {expected_index for expected_index, _, _ in phonetic_mappings}
+    exact_character_expected = {
+        expected_index
+        for expected_index, observed_index, _ in phonetic_mappings
+        if expected_characters[expected_index] == observed[observed_index].char
+    }
 
     provisional: list[TimedLine] = []
     for index, (line, (start_index, end_index)) in enumerate(zip(lyric_lines, line_ranges)):
@@ -269,20 +305,29 @@ def align_lyrics(
         start = min(span[0] for span in spans)
         end = max(span[1] for span in spans)
         total = end_index - start_index
-        exact = sum(1 for char_index in range(start_index, end_index) if char_index in exact_expected)
-        probabilities = [span[3] for span in spans if span[3] > 0]
-        asr_probability = sum(probabilities) / len(probabilities) if probabilities else 0.0
-        lexical_ratio = exact / total
-        confidence = lexical_ratio * (0.65 + 0.35 * asr_probability)
+        exact = sum(
+            1
+            for char_index in range(start_index, end_index)
+            if char_index in exact_character_expected
+        )
+        phonetic = sum(
+            1
+            for char_index in range(start_index, end_index)
+            if char_index in phonetic_expected
+        )
+        phonetic_ratio = phonetic / total
+        text_ratio = exact / total
         provisional.append(
             TimedLine(
                 index=index + 1,
                 text=line,
                 start=max(0.0, start),
                 end=max(start + 0.15, end),
-                confidence=round(confidence, 3),
+                confidence=round(phonetic_ratio, 3),
                 matched_characters=exact,
                 total_characters=total,
+                matched_phonetics=phonetic,
+                text_confidence=round(text_ratio, 3),
             )
         )
 
@@ -303,12 +348,16 @@ def align_lyrics(
         line.start = round(line.start, 3)
         line.end = round(max(line.start + 0.12, line.end), 3)
 
-    exact_matches = len(exact_expected)
+    phonetic_matches = len(phonetic_expected)
+    exact_matches = len(exact_character_expected)
     diagnostics = {
-        "expected_characters": len(expected),
+        "expected_characters": len(expected_characters),
         "recognized_characters": len(observed),
         "exact_matches": exact_matches,
-        "overall_confidence": round(exact_matches / len(expected), 3),
+        "phonetic_matches": phonetic_matches,
+        "phonetic_confidence": round(phonetic_matches / len(expected_characters), 3),
+        "text_confidence": round(exact_matches / len(expected_characters), 3),
+        "overall_confidence": round(phonetic_matches / len(expected_characters), 3),
         "recognized_text": "".join(char.char for char in observed),
     }
     return provisional, diagnostics

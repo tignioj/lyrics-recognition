@@ -267,6 +267,8 @@ function renderResult(data) {
   const transcription = data.metadata.transcription || {};
   const quality = Math.round(diagnostics.overall_confidence * 100);
   document.querySelector('#quality-score').textContent = `${quality}%`;
+  const textQuality = Math.round((diagnostics.text_confidence ?? 0) * 100);
+  document.querySelector('#text-quality-score').textContent = `${textQuality}%`;
   document.querySelector('#duration').textContent = formatClock(data.metadata.duration);
   document.querySelector('#processing-duration').textContent = `${data.metadata.processing_seconds.toFixed(1)}s`;
   const processingNotes = [];
@@ -275,6 +277,13 @@ function renderResult(data) {
   }
   if (transcription.prompt_retry) {
     processingNotes.push('首次识别无有效文字，已自动重试');
+  }
+  if (transcription.decoding_retry) {
+    processingNotes.push(
+      transcription.decoding_retry_selected
+        ? '检测到低匹配行，已改用无歌词提示的结果'
+        : '已校验无歌词提示的候选，保留原结果'
+    );
   }
   const note = processingNotes.length ? ` · ${processingNotes.join('；')}` : '';
   document.querySelector('#result-summary').textContent = `${data.lines.length} 行歌词${note} · 点击任意一行可试听定位`;
@@ -296,6 +305,10 @@ function renderResult(data) {
     confidence.className = `confidence${line.confidence < .45 ? ' low' : ''}`;
     confidence.textContent = `${Math.round(line.confidence * 100)}%`;
     confidenceCell.appendChild(confidence);
+    const textConfidence = document.createElement('small');
+    textConfidence.className = 'confidence-detail';
+    textConfidence.textContent = `字 ${Math.round((line.text_confidence ?? 0) * 100)}%`;
+    confidenceCell.appendChild(textConfidence);
     row.appendChild(confidenceCell);
     row.addEventListener('click', () => {
       player.currentTime = line.start;
