@@ -271,7 +271,7 @@ def load_model(model_name: str, device: str = "", compute_type: str = ""):
         from faster_whisper import WhisperModel
     except ImportError as exc:
         raise TranscriberUnavailable(
-            f"语音识别运行依赖不完整（{exc}）。请运行：python -m pip install -r requirements.txt"
+            f"语音识别运行依赖不完整（{exc}）。请运行：uv sync"
         ) from exc
 
     if not device or not compute_type:

@@ -1,6 +1,0 @@
-fastapi==0.116.1
-uvicorn[standard]==0.35.0
-python-multipart==0.0.20
-faster-whisper==1.2.0
-nvidia-cublas-cu12==12.9.2.10; sys_platform == "win32"
-requests==2.32.5

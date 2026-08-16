@@ -12,13 +12,11 @@
 
 ## 本地启动
 
-需要 Python 3.10 或更高版本。`faster-whisper` 通过 PyAV 解码音频，不要求单独安装系统 FFmpeg。
+需要安装 [uv](https://docs.astral.sh/uv/)。项目使用 Python 3.12；`uv` 会自动准备 Python 和 `.venv`。`faster-whisper` 通过 PyAV 解码音频，不要求单独安装系统 FFmpeg。
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m uvicorn app:app --host 127.0.0.1 --port 8000
+uv sync
+uv run uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 浏览器打开 <http://127.0.0.1:8000>。接口文档在 <http://127.0.0.1:8000/docs>。
@@ -30,7 +28,7 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000
 也可以不启动服务，直接进行批处理：
 
 ```powershell
-.venv\Scripts\python.exe cli.py "song\亲爱的，那不是爱情_张韶涵.mp3" `
+uv run python cli.py "song\亲爱的，那不是爱情_张韶涵.mp3" `
   "song\亲爱的，那不是爱情_张韶涵.txt" --model small
 ```
 
@@ -95,5 +93,5 @@ curl.exe -X POST http://127.0.0.1:8000/api/align `
 核心对齐算法的测试不需要下载 Whisper 模型：
 
 ```powershell
-python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
