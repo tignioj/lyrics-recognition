@@ -1,13 +1,62 @@
 from __future__ import annotations
 
+import ctypes
 from functools import lru_cache
+import os
 from pathlib import Path
+import site
 
-from .alignment import WordSpan
+from .alignment import WordSpan, normalized_characters
 
 
 class TranscriberUnavailable(RuntimeError):
     pass
+
+
+_CUDA_DLL_HANDLES: list[object] = []
+
+
+def _configure_cuda_dll_directories() -> None:
+    """Expose CUDA DLLs installed by NVIDIA's Windows Python packages."""
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+
+    relative_directories = (
+        Path("nvidia/cublas/bin"),
+        Path("nvidia/cuda_nvrtc/bin"),
+    )
+    for package_root in map(Path, site.getsitepackages()):
+        for relative_directory in relative_directories:
+            dll_directory = package_root / relative_directory
+            if dll_directory.is_dir():
+                _CUDA_DLL_HANDLES.append(os.add_dll_directory(str(dll_directory)))
+                if relative_directory == Path("nvidia/cublas/bin"):
+                    # CTranslate2 loads cuBLAS by basename at first inference.
+                    # Preloading by absolute path makes the pip-installed DLLs
+                    # visible to that native loader on Windows.
+                    for filename in ("cublasLt64_12.dll", "cublas64_12.dll"):
+                        dll_path = dll_directory / filename
+                        if dll_path.is_file():
+                            _CUDA_DLL_HANDLES.append(ctypes.WinDLL(str(dll_path)))
+
+
+_configure_cuda_dll_directories()
+
+
+def _cached_model_path(model_name: str) -> str | None:
+    """Return a complete cached model without contacting Hugging Face."""
+    from faster_whisper.utils import download_model
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    try:
+        model_path = Path(download_model(model_name, local_files_only=True))
+    except LocalEntryNotFoundError:
+        return None
+
+    required_files = ("config.json", "model.bin")
+    if not all((model_path / filename).is_file() for filename in required_files):
+        return None
+    return str(model_path)
 
 
 def _runtime_device() -> tuple[str, str]:
@@ -32,7 +81,14 @@ def load_model(model_name: str, device: str = "", compute_type: str = ""):
 
     if not device or not compute_type:
         device, compute_type = _runtime_device()
-    return WhisperModel(model_name, device=device, compute_type=compute_type)
+    cached_path = _cached_model_path(model_name)
+    model_source = cached_path or model_name
+    return WhisperModel(
+        model_source,
+        device=device,
+        compute_type=compute_type,
+        local_files_only=bool(cached_path),
+    )
 
 
 def audio_duration(path: str | Path) -> float:
@@ -63,7 +119,7 @@ def transcribe(
     model = load_model(model_name)
     prompt = lyrics[:6000]
 
-    def run(active_model):
+    def run(active_model, active_prompt: str | None):
         segments, info = active_model.transcribe(
             str(audio_path),
             language=language or None,
@@ -73,7 +129,7 @@ def transcribe(
             word_timestamps=True,
             vad_filter=False,
             condition_on_previous_text=True,
-            initial_prompt=prompt,
+            initial_prompt=active_prompt,
         )
 
         words: list[WordSpan] = []
@@ -95,15 +151,25 @@ def transcribe(
         return words, info, segment_count
 
     runtime = "gpu"
+    active_model = model
     try:
-        words, info, segment_count = run(model)
+        words, info, segment_count = run(active_model, prompt)
     except RuntimeError as exc:
         message = str(exc).casefold()
         cuda_runtime_missing = any(name in message for name in ("cublas", "cudnn", "cuda"))
         if not cuda_runtime_missing:
             raise
         runtime = "cpu-fallback"
-        words, info, segment_count = run(load_model(model_name, "cpu", "int8"))
+        active_model = load_model(model_name, "cpu", "int8")
+        words, info, segment_count = run(active_model, prompt)
+
+    attempts = 1
+    usable_text = "".join(word.text for word in words)
+    if prompt and not normalized_characters(usable_text):
+        # Some singing voices make Whisper echo only invisible prompt tokens.
+        # A prompt-free retry recovers useful timestamps for those files.
+        words, info, segment_count = run(active_model, None)
+        attempts += 1
 
     details = {
         "detected_language": info.language,
@@ -111,5 +177,7 @@ def transcribe(
         "segments": segment_count,
         "words": len(words),
         "runtime": runtime,
+        "attempts": attempts,
+        "prompt_retry": attempts > 1,
     }
     return words, details

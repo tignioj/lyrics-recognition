@@ -60,11 +60,20 @@ function showState(state) {
 function renderResult(data) {
   currentResult = data;
   const diagnostics = data.metadata.diagnostics;
+  const transcription = data.metadata.transcription || {};
   const quality = Math.round(diagnostics.overall_confidence * 100);
   document.querySelector('#quality-score').textContent = `${quality}%`;
   document.querySelector('#duration').textContent = formatClock(data.metadata.duration);
   document.querySelector('#processing-duration').textContent = `${data.metadata.processing_seconds.toFixed(1)}s`;
-  document.querySelector('#result-summary').textContent = `${data.lines.length} 行歌词 · 点击任意一行可试听定位`;
+  const processingNotes = [];
+  if (data.metadata.effective_model && data.metadata.effective_model !== data.metadata.model) {
+    processingNotes.push(`${data.metadata.model} 匹配过低，已自动改用 ${data.metadata.effective_model}`);
+  }
+  if (transcription.prompt_retry) {
+    processingNotes.push('首次识别无有效文字，已自动重试');
+  }
+  const note = processingNotes.length ? ` · ${processingNotes.join('；')}` : '';
+  document.querySelector('#result-summary').textContent = `${data.lines.length} 行歌词${note} · 点击任意一行可试听定位`;
 
   const body = document.querySelector('#timeline-body');
   body.replaceChildren();
@@ -138,4 +147,3 @@ document.querySelectorAll('[data-format]').forEach(button => button.addEventList
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }));
-

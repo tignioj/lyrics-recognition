@@ -8,6 +8,7 @@ import time
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from lyrics_sync import __version__
 from lyrics_sync.alignment import align_lyrics, clean_lyrics
@@ -19,12 +20,56 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_MB", "200")) * 1024 * 1024
 ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3", "turbo"}
+MINIMUM_USEFUL_MATCH = 0.05
 
 app = FastAPI(
     title="Lyrics Sync API",
     version=__version__,
     description="上传音频与标准歌词，返回逐行时间戳及 AE/LRC/SRT/CSV 导出。",
 )
+
+
+def _process_audio(
+    audio_path: Path,
+    lyrics: str,
+    lines: list[str],
+    model: str,
+    language: str,
+) -> tuple[float, list, dict, dict]:
+    """Run CPU/GPU-heavy work away from FastAPI's event-loop thread."""
+    duration = audio_duration(audio_path)
+    words, transcription = transcribe(audio_path, lyrics, model, language)
+    if duration <= 0 and words:
+        duration = max(word.end for word in words)
+    timed_lines, diagnostics = align_lyrics(lines, words, duration)
+
+    if model != "small" and diagnostics["overall_confidence"] < MINIMUM_USEFUL_MATCH:
+        fallback_words, fallback_transcription = transcribe(
+            audio_path,
+            lyrics,
+            "small",
+            language,
+        )
+        fallback_lines, fallback_diagnostics = align_lyrics(
+            lines,
+            fallback_words,
+            duration,
+        )
+        if fallback_diagnostics["overall_confidence"] > diagnostics["overall_confidence"]:
+            timed_lines = fallback_lines
+            diagnostics = fallback_diagnostics
+            transcription = fallback_transcription
+            transcription.update(
+                {
+                    "requested_model": model,
+                    "effective_model": "small",
+                    "fallback_reason": "requested model had almost no lyric matches",
+                }
+            )
+
+    transcription.setdefault("requested_model", model)
+    transcription.setdefault("effective_model", model)
+    return duration, timed_lines, diagnostics, transcription
 
 
 @app.get("/api/health")
@@ -58,11 +103,14 @@ async def align(
                         raise HTTPException(status_code=413, detail="音频文件超过大小限制")
                     output.write(chunk)
 
-            duration = audio_duration(audio_path)
-            words, transcription = transcribe(audio_path, lyrics, model, language)
-            if duration <= 0 and words:
-                duration = max(word.end for word in words)
-            timed_lines, diagnostics = align_lyrics(lines, words, duration)
+            duration, timed_lines, diagnostics, transcription = await run_in_threadpool(
+                _process_audio,
+                audio_path,
+                lyrics,
+                lines,
+                model,
+                language,
+            )
     except HTTPException:
         raise
     except TranscriberUnavailable as exc:
@@ -78,6 +126,7 @@ async def align(
         "filename": audio.filename or "audio",
         "duration": round(duration, 3),
         "model": model,
+        "effective_model": transcription.get("effective_model", model),
         "language": language,
         "processing_seconds": round(time.perf_counter() - started, 3),
         "diagnostics": diagnostics,
@@ -96,4 +145,3 @@ def index() -> FileResponse:
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
