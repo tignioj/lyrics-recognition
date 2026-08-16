@@ -13,13 +13,19 @@ from starlette.concurrency import run_in_threadpool
 from lyrics_sync import __version__
 from lyrics_sync.alignment import align_lyrics, clean_lyrics
 from lyrics_sync.exporters import build_exports
-from lyrics_sync.transcriber import TranscriberUnavailable, audio_duration, transcribe
+from lyrics_sync.transcriber import (
+    TranscriberUnavailable,
+    audio_duration,
+    model_cache_status,
+    transcribe,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_MB", "200")) * 1024 * 1024
 ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3", "turbo"}
+MODEL_ORDER = ("small", "medium", "large-v3", "turbo", "base", "tiny")
 MINIMUM_USEFUL_MATCH = 0.05
 
 app = FastAPI(
@@ -75,6 +81,11 @@ def _process_audio(
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "version": __version__}
+
+
+@app.get("/api/models")
+def models() -> dict:
+    return {"models": [model_cache_status(name) for name in MODEL_ORDER]}
 
 
 @app.post("/api/align")

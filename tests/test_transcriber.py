@@ -6,10 +6,40 @@ from unittest.mock import patch
 
 from huggingface_hub.errors import LocalEntryNotFoundError
 
-from lyrics_sync.transcriber import _cached_model_path, transcribe
+from lyrics_sync.transcriber import _cached_model_path, model_cache_status, transcribe
 
 
 class TranscriberTests(unittest.TestCase):
+    def test_model_cache_status_reports_complete_snapshot_and_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "models--Systran--faster-whisper-small"
+            snapshot = repo_dir / "snapshots" / "commit-id"
+            snapshot.mkdir(parents=True)
+            (repo_dir / "refs").mkdir()
+            (repo_dir / "refs" / "main").write_text("commit-id", encoding="utf-8")
+            (snapshot / "config.json").write_bytes(b"{}")
+            (snapshot / "model.bin").write_bytes(b"model")
+
+            status = model_cache_status("small", temp_dir)
+
+            self.assertEqual(status["status"], "downloaded")
+            self.assertTrue(status["downloaded"])
+            self.assertEqual(status["progress"], 100.0)
+            self.assertEqual(status["path"], str(snapshot))
+
+    def test_model_cache_status_reports_partial_download(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "models--Systran--faster-whisper-large-v3"
+            blobs = repo_dir / "blobs"
+            blobs.mkdir(parents=True)
+            (blobs / "model.incomplete").write_bytes(b"partial")
+
+            status = model_cache_status("large-v3", temp_dir)
+
+            self.assertEqual(status["status"], "partial")
+            self.assertEqual(status["downloaded_bytes"], 7)
+            self.assertEqual(status["path"], str(repo_dir))
+
     @patch("faster_whisper.utils.download_model")
     def test_cached_model_path_uses_complete_local_snapshot(self, mocked_download):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -20,6 +20,16 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    @patch("app.model_cache_status")
+    def test_models_returns_status_for_every_supported_model(self, mocked_status):
+        mocked_status.side_effect = lambda name: {"name": name, "status": "not_downloaded"}
+
+        response = self.client.get("/api/models")
+
+        self.assertEqual(response.status_code, 200)
+        names = [item["name"] for item in response.json()["models"]]
+        self.assertEqual(names, ["small", "medium", "large-v3", "turbo", "base", "tiny"])
+
     @patch("app.run_in_threadpool", new_callable=AsyncMock)
     def test_align_dispatches_blocking_work_to_threadpool(self, mocked_threadpool):
         mocked_threadpool.return_value = (

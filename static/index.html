@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>歌词时间轴 · Lyrics Sync</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2">
+  <link rel="stylesheet" href="/static/styles.css?v=4">
 </head>
 <body>
   <main class="shell">
@@ -36,8 +36,8 @@
         <div class="textarea-meta"><span id="line-count">0 行</span><span>空行会自动忽略</span></div>
 
         <div class="settings-row">
-          <label>
-            <span class="field-label">识别模型</span>
+          <label class="model-setting">
+            <span class="field-label model-label">识别模型 <span id="model-badge" class="model-badge is-checking">检查中</span></span>
             <select id="model" name="model">
               <option value="small" selected>Small · 推荐起步</option>
               <option value="medium">Medium · 更准确</option>
@@ -46,6 +46,11 @@
               <option value="base">Base · 低配置</option>
               <option value="tiny">Tiny · 仅测试</option>
             </select>
+            <div id="model-status" class="model-status" aria-live="polite">
+              <div class="model-status-line"><strong id="model-status-text">正在读取模型缓存…</strong><span id="model-size"></span></div>
+              <div id="model-progress" class="model-progress" hidden><i id="model-progress-bar"></i></div>
+              <div class="model-path"><span id="model-path-label">缓存位置</span><code id="model-path">—</code></div>
+            </div>
           </label>
           <label>
             <span class="field-label">歌词语言</span>
@@ -83,6 +88,7 @@
         <div id="processing-state" class="processing-state" hidden>
           <div class="spinner"></div>
           <strong>正在聆听并对齐歌词</strong>
+          <span id="processing-stage">正在准备识别模型…</span>
           <span id="processing-time">已用时 0 秒</span>
           <small>歌曲识别通常需要几十秒到几分钟，请保持页面打开。</small>
         </div>
@@ -94,6 +100,14 @@
 
         <div id="results" hidden>
           <audio id="audio-player" controls></audio>
+          <div id="lyrics-now" class="lyrics-now" aria-live="polite">
+            <div class="lyrics-now-meta">
+              <span id="lyrics-now-label">等待播放</span>
+              <time id="lyrics-now-time">00:00.00</time>
+            </div>
+            <strong id="lyrics-now-current">点击播放，歌词会跟随音频高亮</strong>
+            <span id="lyrics-now-next"></span>
+          </div>
           <div class="quality-card">
             <div><span>整体匹配</span><strong id="quality-score">—</strong></div>
             <div><span>歌曲时长</span><strong id="duration">—</strong></div>
@@ -108,7 +122,7 @@
             <button type="button" data-format="json"><strong>JSON</strong><span>接口与程序调用</span></button>
           </div>
 
-          <div class="table-wrap">
+          <div id="timeline-wrap" class="table-wrap">
             <table>
               <thead><tr><th>#</th><th>开始</th><th>结束</th><th>歌词</th><th>匹配</th></tr></thead>
               <tbody id="timeline-body"></tbody>
@@ -118,6 +132,6 @@
       </section>
     </section>
   </main>
-  <script src="/static/app.js?v=3" defer></script>
+  <script src="/static/app.js?v=5" defer></script>
 </body>
 </html>
