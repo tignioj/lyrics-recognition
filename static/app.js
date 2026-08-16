@@ -15,6 +15,7 @@ const modelProgress = document.querySelector('#model-progress');
 const modelProgressBar = document.querySelector('#model-progress-bar');
 const modelPathLabel = document.querySelector('#model-path-label');
 const modelPath = document.querySelector('#model-path');
+const modelDownloadButton = document.querySelector('#model-download-button');
 const processingStage = document.querySelector('#processing-stage');
 const player = document.querySelector('#audio-player');
 const timelineWrap = document.querySelector('#timeline-wrap');
@@ -26,6 +27,7 @@ let currentResult = null;
 let timer = null;
 let modelPollTimer = null;
 let modelStatuses = new Map();
+let isProcessing = false;
 let audioUrl = null;
 let activeLineIndex = -1;
 
@@ -60,6 +62,28 @@ function renderModelOptions() {
   });
 }
 
+function updateModelActions(status) {
+  const modelReady = Boolean(status?.downloaded);
+  submitButton.disabled = isProcessing || !modelReady;
+  submitButton.querySelector('span').textContent = modelReady
+    ? '生成歌词时间轴'
+    : '请先下载当前模型';
+
+  modelDownloadButton.hidden = !status || modelReady;
+  if (!status || modelReady) return;
+  const downloading = status.status === 'downloading';
+  modelDownloadButton.disabled = downloading;
+  if (downloading) {
+    modelDownloadButton.textContent = status.phase === 'reconstructing'
+      ? `正在写入 · ${status.progress.toFixed(1)}%`
+      : `正在下载 · ${status.progress.toFixed(1)}%`;
+  } else if (status.status === 'partial') {
+    modelDownloadButton.textContent = `继续下载模型 · ${formatBytes(status.total_bytes)}`;
+  } else {
+    modelDownloadButton.textContent = `下载模型 · ${formatBytes(status.total_bytes)}`;
+  }
+}
+
 function renderSelectedModelStatus() {
   const status = modelStatuses.get(modelSelect.value);
   modelBadge.className = 'model-badge';
@@ -71,6 +95,7 @@ function renderSelectedModelStatus() {
     modelProgress.hidden = true;
     modelPathLabel.textContent = '缓存位置';
     modelPath.textContent = '—';
+    updateModelActions(null);
     return;
   }
 
@@ -111,6 +136,7 @@ function renderSelectedModelStatus() {
     modelProgress.hidden = true;
     modelPathLabel.textContent = '将下载到';
   }
+  updateModelActions(status);
 }
 
 function updateProcessingStage() {
@@ -139,6 +165,7 @@ async function refreshModelStatuses(updateStage = false) {
     renderModelOptions();
     renderSelectedModelStatus();
     if (updateStage) updateProcessingStage();
+    syncModelPolling();
   } catch (error) {
     modelBadge.className = 'model-badge is-error';
     modelBadge.textContent = '状态未知';
@@ -147,7 +174,45 @@ async function refreshModelStatuses(updateStage = false) {
   }
 }
 
+function syncModelPolling() {
+  const hasActiveDownload = [...modelStatuses.values()]
+    .some(status => status.status === 'downloading');
+  if (hasActiveDownload && !modelPollTimer) {
+    modelPollTimer = setInterval(() => refreshModelStatuses(isProcessing), 750);
+  } else if (!hasActiveDownload && modelPollTimer) {
+    clearInterval(modelPollTimer);
+    modelPollTimer = null;
+  }
+}
+
+async function startModelDownload() {
+  const modelName = modelSelect.value;
+  const status = modelStatuses.get(modelName);
+  if (!status || status.downloaded || status.status === 'downloading') return;
+
+  modelStatuses.set(modelName, { ...status, status: 'downloading', phase: 'starting' });
+  renderModelOptions();
+  renderSelectedModelStatus();
+  syncModelPolling();
+  try {
+    const response = await fetch(`/api/models/${encodeURIComponent(modelName)}/download`, {
+      method: 'POST',
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(parseError(payload, response.status));
+    modelStatuses.set(modelName, payload);
+    renderModelOptions();
+    renderSelectedModelStatus();
+    syncModelPolling();
+  } catch (error) {
+    modelStatuses.set(modelName, { ...status, status: 'error', error: error.message });
+    renderModelOptions();
+    renderSelectedModelStatus();
+  }
+}
+
 modelSelect.addEventListener('change', renderSelectedModelStatus);
+modelDownloadButton.addEventListener('click', startModelDownload);
 refreshModelStatuses();
 
 function updateFile(file) {
@@ -332,18 +397,21 @@ function parseError(payload, status) {
 form.addEventListener('submit', async event => {
   event.preventDefault();
   if (!audioInput.files[0]) return;
+  if (!modelStatuses.get(modelSelect.value)?.downloaded) {
+    renderSelectedModelStatus();
+    return;
+  }
+  isProcessing = true;
   showState('processing');
-  submitButton.disabled = true;
+  updateModelActions(modelStatuses.get(modelSelect.value));
   currentResult = null;
   const start = Date.now();
   clearInterval(timer);
-  clearInterval(modelPollTimer);
   updateProcessingStage();
   refreshModelStatuses(true);
   timer = setInterval(() => {
     document.querySelector('#processing-time').textContent = `已用时 ${Math.floor((Date.now() - start) / 1000)} 秒`;
   }, 1000);
-  modelPollTimer = setInterval(() => refreshModelStatuses(true), 750);
 
   try {
     const response = await fetch('/api/align', { method: 'POST', body: new FormData(form) });
@@ -355,9 +423,9 @@ form.addEventListener('submit', async event => {
     showState('error');
   } finally {
     clearInterval(timer);
-    clearInterval(modelPollTimer);
+    isProcessing = false;
+    updateModelActions(modelStatuses.get(modelSelect.value));
     refreshModelStatuses();
-    submitButton.disabled = false;
   }
 });
 

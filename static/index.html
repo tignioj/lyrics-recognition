@@ -36,8 +36,8 @@
         <div class="textarea-meta"><span id="line-count">0 行</span><span>空行会自动忽略</span></div>
 
         <div class="settings-row">
-          <label class="model-setting">
-            <span class="field-label model-label">识别模型 <span id="model-badge" class="model-badge is-checking">检查中</span></span>
+          <div class="model-setting">
+            <label class="field-label model-label" for="model">识别模型 <span id="model-badge" class="model-badge is-checking">检查中</span></label>
             <select id="model" name="model">
               <option value="small" selected>Small · 推荐起步</option>
               <option value="medium">Medium · 更准确</option>
@@ -50,8 +50,9 @@
               <div class="model-status-line"><strong id="model-status-text">正在读取模型缓存…</strong><span id="model-size"></span></div>
               <div id="model-progress" class="model-progress" hidden><i id="model-progress-bar"></i></div>
               <div class="model-path"><span id="model-path-label">缓存位置</span><code id="model-path">—</code></div>
+              <button id="model-download-button" class="model-download-button" type="button" hidden>下载模型</button>
             </div>
-          </label>
+          </div>
           <label>
             <span class="field-label">歌词语言</span>
             <select id="language" name="language">
@@ -64,10 +65,10 @@
           </label>
         </div>
 
-        <button id="submit-button" class="primary-button" type="submit">
-          <span>生成歌词时间轴</span><span aria-hidden="true">→</span>
+        <button id="submit-button" class="primary-button" type="submit" disabled>
+          <span>正在读取模型状态</span><span aria-hidden="true">→</span>
         </button>
-        <p class="model-note">首次使用某个模型会自动下载模型文件，等待时间取决于网络与模型大小。</p>
+        <p class="model-note">未下载的模型请先点击模型状态卡中的下载按钮；下载期间可切换到其他已就绪模型。</p>
       </form>
 
       <section class="result-panel">
@@ -132,6 +133,6 @@
       </section>
     </section>
   </main>
-  <script src="/static/app.js?v=6" defer></script>
+  <script src="/static/app.js?v=7" defer></script>
 </body>
 </html>

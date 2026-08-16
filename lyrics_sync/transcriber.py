@@ -47,6 +47,7 @@ _MODEL_FILES = {
 }
 _DOWNLOAD_PROGRESS: dict[str, dict[str, Any]] = {}
 _DOWNLOAD_PROGRESS_LOCK = Lock()
+_MODEL_DOWNLOAD_LOCKS = {name: Lock() for name in MODEL_REPOSITORIES}
 
 
 def _configure_cuda_dll_directories() -> None:
@@ -294,6 +295,15 @@ def _download_model_with_progress(model_name: str) -> str:
     return model_path
 
 
+def ensure_model_downloaded(model_name: str) -> str:
+    """Return a complete cached model, downloading it at most once if needed."""
+    if model_name not in MODEL_REPOSITORIES:
+        raise ValueError(f"Unsupported model: {model_name}")
+    with _MODEL_DOWNLOAD_LOCKS[model_name]:
+        cached_path = _cached_model_path(model_name)
+        return cached_path or _download_model_with_progress(model_name)
+
+
 def _runtime_device() -> tuple[str, str]:
     try:
         import ctranslate2
@@ -316,8 +326,7 @@ def load_model(model_name: str, device: str = "", compute_type: str = ""):
 
     if not device or not compute_type:
         device, compute_type = _runtime_device()
-    cached_path = _cached_model_path(model_name)
-    model_source = cached_path or _download_model_with_progress(model_name)
+    model_source = ensure_model_downloaded(model_name)
     return WhisperModel(
         model_source,
         device=device,

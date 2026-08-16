@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import tempfile
+from threading import Thread
 import time
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -16,6 +17,7 @@ from lyrics_sync.exporters import build_exports
 from lyrics_sync.transcriber import (
     TranscriberUnavailable,
     audio_duration,
+    ensure_model_downloaded,
     model_cache_status,
     transcribe,
 )
@@ -86,6 +88,32 @@ def health() -> dict:
 @app.get("/api/models")
 def models() -> dict:
     return {"models": [model_cache_status(name) for name in MODEL_ORDER]}
+
+
+def _download_model_in_background(model_name: str) -> None:
+    try:
+        ensure_model_downloaded(model_name)
+    except Exception:
+        # The transcriber records the error for /api/models. The download is a
+        # background convenience task and must not terminate the web server.
+        return
+
+
+@app.post("/api/models/{model_name}/download", status_code=202)
+def download_model(model_name: str) -> dict:
+    if model_name not in ALLOWED_MODELS:
+        raise HTTPException(status_code=404, detail=f"不支持的模型：{model_name}")
+    status = model_cache_status(model_name)
+    if status["status"] == "downloaded":
+        return status
+    if status["status"] != "downloading":
+        Thread(
+            target=_download_model_in_background,
+            args=(model_name,),
+            name=f"model-download-{model_name}",
+            daemon=True,
+        ).start()
+    return {**status, "status": "downloading"}
 
 
 @app.post("/api/align")

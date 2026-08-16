@@ -65,6 +65,9 @@ textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 2p
 .model-path { margin-top: 8px; color: var(--muted); font-size: 9px; line-height: 1.45; }
 .model-path span { display: block; margin-bottom: 2px; }
 .model-path code { display: block; overflow-wrap: anywhere; color: #514d45; font-family: Consolas, monospace; font-size: 9px; }
+.model-download-button { width: 100%; margin-top: 10px; padding: 9px 10px; border: 1px solid var(--ink); background: transparent; color: var(--ink); font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.model-download-button:hover { border-color: var(--accent); color: var(--accent); }
+.model-download-button:disabled { border-color: var(--line); color: var(--muted); cursor: wait; }
 select { height: 45px; padding: 0 12px; }
 .primary-button { width: 100%; border: 0; background: var(--accent); color: white; display: flex; justify-content: space-between; padding: 17px 20px; margin-top: 28px; font: inherit; font-weight: 800; cursor: pointer; transition: .2s ease; }
 .primary-button:hover { background: var(--accent-dark); }

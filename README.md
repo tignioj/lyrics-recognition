@@ -23,7 +23,7 @@ uv run uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 
 如果 Windows 报端口权限或占用错误，可换一个端口，例如 `--port 8765`，并打开 <http://127.0.0.1:8765>。
 
-首次使用某个 Whisper 模型时会下载模型文件。中文歌曲建议先用 `small`；准确度不足时换成 `medium` 或 `large-v3`。CPU 可以运行但速度较慢，有 NVIDIA CUDA 时会自动使用 GPU 和 FP16。
+首次使用某个 Whisper 模型时，先在模型状态卡中单独下载；下载期间仍可切换到其他已就绪模型。中文歌曲建议先用 `small`；准确度不足时换成 `medium` 或 `large-v3`。CPU 可以运行但速度较慢，有 NVIDIA CUDA 时会自动使用 GPU 和 FP16。
 
 也可以不启动服务，直接进行批处理：
 

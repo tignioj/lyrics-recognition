@@ -30,6 +30,37 @@ class ApiTests(unittest.TestCase):
         names = [item["name"] for item in response.json()["models"]]
         self.assertEqual(names, ["small", "medium", "large-v3", "turbo", "base", "tiny"])
 
+    @patch("app.Thread")
+    @patch("app.model_cache_status")
+    def test_model_download_starts_in_background(self, mocked_status, mocked_thread):
+        mocked_status.return_value = {
+            "name": "medium",
+            "status": "not_downloaded",
+            "downloaded": False,
+        }
+
+        response = self.client.post("/api/models/medium/download")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["status"], "downloading")
+        mocked_thread.return_value.start.assert_called_once_with()
+
+    @patch("app.Thread")
+    @patch("app.model_cache_status")
+    def test_downloaded_model_does_not_start_background_task(
+        self, mocked_status, mocked_thread
+    ):
+        mocked_status.return_value = {
+            "name": "small",
+            "status": "downloaded",
+            "downloaded": True,
+        }
+
+        response = self.client.post("/api/models/small/download")
+
+        self.assertEqual(response.status_code, 202)
+        mocked_thread.assert_not_called()
+
     @patch("app.run_in_threadpool", new_callable=AsyncMock)
     def test_align_dispatches_blocking_work_to_threadpool(self, mocked_threadpool):
         mocked_threadpool.return_value = (
